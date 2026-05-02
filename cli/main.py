@@ -1,8 +1,9 @@
-from typing import Optional
+from typing import Any, Optional
 import datetime
 import typer
 from pathlib import Path
 from functools import wraps
+import re
 from rich.console import Console
 from dotenv import load_dotenv
 
@@ -29,7 +30,10 @@ from tradingagents.default_config import DEFAULT_CONFIG
 from cli.models import AnalystType
 from cli.utils import *
 from cli.announcements import fetch_announcements, display_announcements
+from cli.input_loader import InputLoadError, load_tickers_from_source, resolve_input_path
 from cli.stats_handler import StatsCallbackHandler
+from cli.summary import BatchTickerResult, build_result_details, build_summary_table, summarize_final_decision
+from cli.telegram import TelegramConfig, TelegramNotifier, build_completion_message, build_start_message
 
 console = Console()
 
@@ -636,6 +640,286 @@ def get_analysis_date():
             )
 
 
+def current_analysis_date() -> str:
+    return datetime.datetime.now().strftime("%Y-%m-%d")
+
+
+def build_batch_run_folder_name(
+    started_at: datetime.datetime, country: str, ticker_count: int, max_len: int = 50
+) -> str:
+    safe_country = re.sub(r"[^A-Za-z0-9]+", "_", country.strip().lower()).strip("_") or "na"
+    name = f"{started_at.strftime('%Y%m%d_%H%M%S')}_{safe_country}_{ticker_count}tickers"
+    return name[:max_len].rstrip("_-")
+
+
+def parse_analyst_selection(raw_value: str | None) -> list[AnalystType]:
+    if not raw_value:
+        return [
+            AnalystType.MARKET,
+            AnalystType.SOCIAL,
+            AnalystType.NEWS,
+            AnalystType.FUNDAMENTALS,
+        ]
+
+    analyst_map = {analyst.value: analyst for analyst in AnalystType}
+    selected: list[AnalystType] = []
+    seen: set[str] = set()
+    for item in raw_value.split(","):
+        key = item.strip().lower()
+        if not key:
+            continue
+        if key not in analyst_map:
+            raise typer.BadParameter(
+                f"Unknown analyst '{item}'. Expected comma-separated values from: "
+                f"{', '.join(analyst_map.keys())}"
+            )
+        if key not in seen:
+            selected.append(analyst_map[key])
+            seen.add(key)
+
+    if not selected:
+        raise typer.BadParameter("At least one analyst must be selected.")
+    return selected
+
+
+def normalize_selected_analyst_keys(analysts: list[Any]) -> list[str]:
+    selected_set: set[str] = set()
+    for analyst in analysts:
+        if isinstance(analyst, AnalystType):
+            selected_set.add(analyst.value)
+        else:
+            selected_set.add(str(analyst).strip().lower())
+    return [analyst for analyst in ANALYST_ORDER if analyst in selected_set]
+
+
+def build_non_interactive_selections(
+    *,
+    country: str,
+    analysis_date: str | None,
+    llm_provider: str,
+    shallow_thinker: str | None,
+    deep_thinker: str | None,
+    research_depth: int,
+    analysts: str | None,
+    output_language: str,
+    backend_url: str | None,
+    google_thinking_level: str | None,
+    openai_reasoning_effort: str | None,
+    anthropic_effort: str | None,
+    output_dir: str | None,
+    telegram_enabled: bool,
+) -> dict[str, Any]:
+    run_date = analysis_date or current_analysis_date()
+    return {
+        "country": country,
+        "ticker": None,
+        "analysis_date": run_date,
+        "analysts": parse_analyst_selection(analysts),
+        "research_depth": research_depth,
+        "llm_provider": llm_provider.lower(),
+        "backend_url": backend_url,
+        "shallow_thinker": shallow_thinker or DEFAULT_CONFIG["quick_think_llm"],
+        "deep_thinker": deep_thinker or DEFAULT_CONFIG["deep_think_llm"],
+        "google_thinking_level": google_thinking_level,
+        "openai_reasoning_effort": openai_reasoning_effort,
+        "anthropic_effort": anthropic_effort,
+        "output_language": output_language,
+        "results_dir": output_dir,
+        "telegram_enabled": telegram_enabled,
+    }
+
+
+def build_config_from_selections(selections: dict[str, Any], checkpoint: bool = False) -> dict[str, Any]:
+    config = DEFAULT_CONFIG.copy()
+    config["max_debate_rounds"] = selections["research_depth"]
+    config["max_risk_discuss_rounds"] = selections["research_depth"]
+    config["quick_think_llm"] = selections["shallow_thinker"]
+    config["deep_think_llm"] = selections["deep_thinker"]
+    config["backend_url"] = selections["backend_url"]
+    config["llm_provider"] = selections["llm_provider"].lower()
+    config["google_thinking_level"] = selections.get("google_thinking_level")
+    config["openai_reasoning_effort"] = selections.get("openai_reasoning_effort")
+    config["anthropic_effort"] = selections.get("anthropic_effort")
+    config["output_language"] = selections.get("output_language", "English")
+    config["checkpoint_enabled"] = checkpoint
+    config["telegram_enabled"] = bool(
+        selections.get("telegram_enabled") or config.get("telegram_enabled")
+    )
+    if selections.get("results_dir"):
+        config["results_dir"] = selections["results_dir"]
+    return config
+
+
+def build_notifier(config: dict[str, Any]) -> TelegramNotifier:
+    return TelegramNotifier(
+        TelegramConfig(
+            enabled=bool(config.get("telegram_enabled")),
+            bot_token=config.get("telegram_bot_token"),
+            chat_id=config.get("telegram_chat_id"),
+        )
+    )
+
+
+def notify_safely(notifier: TelegramNotifier, message: str) -> None:
+    if not notifier.enabled:
+        return
+    try:
+        notifier.send_message(message)
+    except Exception as exc:
+        console.print(f"[yellow]Telegram notification failed:[/yellow] {exc}")
+
+
+def format_runtime(started_at: datetime.datetime, ended_at: datetime.datetime) -> str:
+    elapsed = int((ended_at - started_at).total_seconds())
+    minutes, seconds = divmod(elapsed, 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def run_single_background_analysis(
+    selections: dict[str, Any],
+    *,
+    checkpoint: bool = False,
+) -> BatchTickerResult:
+    ticker = selections["ticker"]
+    analysis_date = selections["analysis_date"]
+    config = build_config_from_selections(selections, checkpoint=checkpoint)
+    selected_analyst_keys = normalize_selected_analyst_keys(selections["analysts"])
+
+    try:
+        graph = TradingAgentsGraph(
+            selected_analyst_keys,
+            config=config,
+            debug=False,
+        )
+        final_state, _ = graph.propagate(ticker, analysis_date)
+        results_dir = Path(config["results_dir"]) / ticker / analysis_date
+        results_dir.mkdir(parents=True, exist_ok=True)
+        report_file = save_report_to_disk(final_state, ticker, results_dir / "saved_report")
+        rating, key_points, pm_decision = summarize_final_decision(
+            final_state["final_trade_decision"]
+        )
+        return BatchTickerResult(
+            ticker=ticker,
+            analysis_date=analysis_date,
+            status="success",
+            rating=rating,
+            key_points=key_points,
+            portfolio_manager_decision=pm_decision,
+            report_path=str(report_file),
+        )
+    except Exception as exc:
+        return BatchTickerResult(
+            ticker=ticker,
+            analysis_date=analysis_date,
+            status="failed",
+            error=str(exc),
+        )
+
+
+def run_batch_analysis(
+    base_selections: dict[str, Any],
+    *,
+    country: str,
+    input_path: str | None,
+    latest_files: int,
+    checkpoint: bool = False,
+) -> list[BatchTickerResult]:
+    config = build_config_from_selections(base_selections, checkpoint=checkpoint)
+    notifier = build_notifier(config)
+    started_at = datetime.datetime.now()
+    resolved_input = resolve_input_path(country, input_path)
+    start_time_text = started_at.strftime("%Y-%m-%d %H:%M:%S")
+
+    try:
+        _, selected_files, tickers = load_tickers_from_source(
+            country,
+            input_path,
+            latest_files=latest_files,
+        )
+        base_output_dir = base_selections.get("results_dir")
+        if not base_output_dir:
+            raise InputLoadError("--output-dir is required for input_mode=file")
+
+        run_folder = build_batch_run_folder_name(started_at, country, len(tickers))
+        run_output_dir = Path(base_output_dir) / run_folder
+        run_output_dir.mkdir(parents=True, exist_ok=True)
+
+        notify_safely(
+            notifier,
+            build_start_message(
+                input_path=str(resolved_input),
+                input_mode="file",
+                country=country,
+                start_time=start_time_text,
+                tickers=tickers,
+            ),
+        )
+
+        console.print(
+            f"[cyan]Batch input resolved:[/cyan] {resolved_input} "
+            f"({len(selected_files)} file(s), {len(tickers)} ticker(s))"
+        )
+        console.print(f"[cyan]Batch output directory:[/cyan] {run_output_dir}")
+
+        results: list[BatchTickerResult] = []
+        for ticker in tickers:
+            ticker_selections = dict(base_selections)
+            ticker_selections["ticker"] = ticker
+            ticker_selections["results_dir"] = str(run_output_dir)
+            console.print(f"[blue]Running analysis for[/blue] {ticker}")
+            result = run_single_background_analysis(
+                ticker_selections,
+                checkpoint=checkpoint,
+            )
+            results.append(result)
+            if result.status == "success":
+                console.print(f"[green]Completed[/green] {ticker} ({result.rating})")
+            else:
+                console.print(f"[red]Failed[/red] {ticker}: {result.error}")
+
+        ended_at = datetime.datetime.now()
+        status = "SUCCESS" if all(result.status == "success" for result in results) else "PARTIAL FAILURE"
+        notify_safely(
+            notifier,
+            build_completion_message(
+                status=status,
+                input_path=str(resolved_input),
+                input_mode="file",
+                country=country,
+                start_time=start_time_text,
+                end_time=ended_at.strftime("%Y-%m-%d %H:%M:%S"),
+                run_time=format_runtime(started_at, ended_at),
+                summary_table=build_summary_table(results),
+                details=build_result_details(results),
+            ),
+        )
+        return results
+    except Exception as exc:
+        ended_at = datetime.datetime.now()
+        failure_result = BatchTickerResult(
+            ticker="*",
+            analysis_date=base_selections["analysis_date"],
+            status="failed",
+            error=str(exc),
+        )
+        notify_safely(
+            notifier,
+            build_completion_message(
+                status="FAILED",
+                input_path=str(resolved_input),
+                input_mode="file",
+                country=country,
+                start_time=start_time_text,
+                end_time=ended_at.strftime("%Y-%m-%d %H:%M:%S"),
+                run_time=format_runtime(started_at, ended_at),
+                summary_table=build_summary_table([failure_result]),
+                details=build_result_details([failure_result]),
+            ),
+        )
+        raise
+
+
 def save_report_to_disk(final_state, ticker: str, save_path: Path):
     """Save complete analysis report to disk with organized subfolders."""
     save_path.mkdir(parents=True, exist_ok=True)
@@ -926,31 +1210,17 @@ def format_tool_args(args, max_length=80) -> str:
         return result[:max_length - 3] + "..."
     return result
 
-def run_analysis(checkpoint: bool = False):
-    # First get all user selections
-    selections = get_user_selections()
+def run_analysis(checkpoint: bool = False, selections: dict[str, Any] | None = None):
+    if selections is None:
+        selections = get_user_selections()
 
-    # Create config with selected research depth
-    config = DEFAULT_CONFIG.copy()
-    config["max_debate_rounds"] = selections["research_depth"]
-    config["max_risk_discuss_rounds"] = selections["research_depth"]
-    config["quick_think_llm"] = selections["shallow_thinker"]
-    config["deep_think_llm"] = selections["deep_thinker"]
-    config["backend_url"] = selections["backend_url"]
-    config["llm_provider"] = selections["llm_provider"].lower()
-    # Provider-specific thinking configuration
-    config["google_thinking_level"] = selections.get("google_thinking_level")
-    config["openai_reasoning_effort"] = selections.get("openai_reasoning_effort")
-    config["anthropic_effort"] = selections.get("anthropic_effort")
-    config["output_language"] = selections.get("output_language", "English")
-    config["checkpoint_enabled"] = checkpoint
+    config = build_config_from_selections(selections, checkpoint=checkpoint)
 
     # Create stats callback handler for tracking LLM/tool calls
     stats_handler = StatsCallbackHandler()
 
     # Normalize analyst selection to predefined order (selection is a 'set', order is fixed)
-    selected_set = {analyst.value for analyst in selections["analysts"]}
-    selected_analyst_keys = [a for a in ANALYST_ORDER if a in selected_set]
+    selected_analyst_keys = normalize_selected_analyst_keys(selections["analysts"])
 
     # Initialize the graph with callbacks bound to LLMs
     graph = TradingAgentsGraph(
@@ -1199,6 +1469,93 @@ def run_analysis(checkpoint: bool = False):
 
 @app.command()
 def analyze(
+    input_mode: str = typer.Option(
+        "user",
+        "--input-mode",
+        help="Input mode: 'user' for interactive prompts, 'file' for non-interactive batch runs.",
+    ),
+    country: str = typer.Option(
+        "US",
+        "--country",
+        help="Country code used for the default input path template Output/Tradesetups_finder/{country}/csv_data.",
+    ),
+    input_path: Optional[str] = typer.Option(
+        None,
+        "--input-path",
+        help="CSV file, comma-separated ticker file, or folder of CSV files. Defaults to Output/Tradesetups_finder/{country}/csv_data.",
+    ),
+    latest_files: int = typer.Option(
+        1,
+        "--latest-files",
+        min=1,
+        help="When input path is a folder, read the latest N CSV files.",
+    ),
+    analysis_date: Optional[str] = typer.Option(
+        None,
+        "--analysis-date",
+        help="Analysis date in YYYY-MM-DD format. Defaults to today for file mode.",
+    ),
+    llm_provider: str = typer.Option(
+        DEFAULT_CONFIG["llm_provider"],
+        "--llm-provider",
+        help="LLM provider for non-interactive runs.",
+    ),
+    shallow_thinker: Optional[str] = typer.Option(
+        None,
+        "--quick-model",
+        help="Quick-thinking model for non-interactive runs.",
+    ),
+    deep_thinker: Optional[str] = typer.Option(
+        None,
+        "--deep-model",
+        help="Deep-thinking model for non-interactive runs.",
+    ),
+    research_depth: int = typer.Option(
+        DEFAULT_CONFIG["max_debate_rounds"],
+        "--research-depth",
+        min=1,
+        help="Research depth for non-interactive runs.",
+    ),
+    analysts: Optional[str] = typer.Option(
+        None,
+        "--analysts",
+        help="Comma-separated analyst keys for non-interactive runs: market,social,news,fundamentals.",
+    ),
+    output_language: str = typer.Option(
+        DEFAULT_CONFIG["output_language"],
+        "--output-language",
+        help="Output language for analyst reports and final decisions.",
+    ),
+    backend_url: Optional[str] = typer.Option(
+        None,
+        "--backend-url",
+        help="Optional backend URL override for the selected provider.",
+    ),
+    google_thinking_level: Optional[str] = typer.Option(
+        None,
+        "--google-thinking-level",
+        help="Provider-specific thinking setting for Google models.",
+    ),
+    openai_reasoning_effort: Optional[str] = typer.Option(
+        None,
+        "--openai-reasoning-effort",
+        help="Provider-specific reasoning effort for OpenAI models.",
+    ),
+    anthropic_effort: Optional[str] = typer.Option(
+        None,
+        "--anthropic-effort",
+        help="Provider-specific effort setting for Anthropic models.",
+    ),
+    output_dir: Optional[str] = typer.Option(
+        None,
+        "--output-dir",
+        help="Base output directory for non-interactive runs. A generated run subfolder is created under this path.",
+    ),
+    telegram: bool = typer.Option(
+        False,
+        "--telegram",
+        help="Enable Telegram notifications for this run.",
+    ),
     checkpoint: bool = typer.Option(
         False,
         "--checkpoint",
@@ -1214,8 +1571,53 @@ def analyze(
         from tradingagents.graph.checkpointer import clear_all_checkpoints
         n = clear_all_checkpoints(DEFAULT_CONFIG["data_cache_dir"])
         console.print(f"[yellow]Cleared {n} checkpoint(s).[/yellow]")
-    run_analysis(checkpoint=checkpoint)
+
+    mode = input_mode.strip().lower()
+    if mode not in {"user", "file"}:
+        raise typer.BadParameter("input_mode must be either 'user' or 'file'.")
+
+    if mode == "user":
+        run_analysis(checkpoint=checkpoint)
+        return
+
+    selections = build_non_interactive_selections(
+        country=country,
+        analysis_date=analysis_date,
+        llm_provider=llm_provider,
+        shallow_thinker=shallow_thinker,
+        deep_thinker=deep_thinker,
+        research_depth=research_depth,
+        analysts=analysts,
+        output_language=output_language,
+        backend_url=backend_url,
+        google_thinking_level=google_thinking_level,
+        openai_reasoning_effort=openai_reasoning_effort,
+        anthropic_effort=anthropic_effort,
+        output_dir=output_dir,
+        telegram_enabled=telegram,
+    )
+
+    try:
+        results = run_batch_analysis(
+            selections,
+            country=country,
+            input_path=input_path,
+            latest_files=latest_files,
+            checkpoint=checkpoint,
+        )
+    except InputLoadError as exc:
+        raise typer.Exit(code=1) from exc
+    except Exception as exc:
+        console.print(f"[red]Batch run failed:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    if any(result.status != "success" for result in results):
+        raise typer.Exit(code=1)
+
+
+def main() -> None:
+    app()
 
 
 if __name__ == "__main__":
-    app()
+    main()
