@@ -1,5 +1,6 @@
 import time
 import logging
+from pathlib import Path
 
 import pandas as pd
 import yfinance as yf
@@ -11,6 +12,49 @@ from .config import get_config
 from .utils import safe_ticker_component
 
 logger = logging.getLogger(__name__)
+
+
+def _read_cached_ohlcv(data_file: str) -> pd.DataFrame | None:
+    """Read a cached OHLCV CSV, returning None when the cache is unusable."""
+    try:
+        data = pd.read_csv(data_file, on_bad_lines="skip", encoding="utf-8")
+    except (pd.errors.EmptyDataError, pd.errors.ParserError, UnicodeDecodeError) as exc:
+        logger.warning("Discarding unreadable OHLCV cache %s: %s", data_file, exc)
+        try:
+            Path(data_file).unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Could not remove unreadable OHLCV cache %s", data_file)
+        return None
+
+    if data.empty or "Date" not in data.columns:
+        logger.warning("Discarding empty/incomplete OHLCV cache %s", data_file)
+        try:
+            Path(data_file).unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Could not remove invalid OHLCV cache %s", data_file)
+        return None
+
+    return data
+
+
+def _download_ohlcv(symbol: str, start_str: str, end_str: str) -> pd.DataFrame:
+    data = yf_retry(
+        lambda: yf.download(
+            symbol,
+            start=start_str,
+            end=end_str,
+            multi_level_index=False,
+            progress=False,
+            auto_adjust=True,
+        )
+    )
+    if data is None or data.empty:
+        raise ValueError(f"No OHLCV data returned for {symbol}")
+
+    data = data.reset_index()
+    if data.empty or "Date" not in data.columns:
+        raise ValueError(f"Downloaded OHLCV data for {symbol} is missing expected columns")
+    return data
 
 
 def yf_retry(func, max_retries=3, base_delay=2.0):
@@ -71,24 +115,21 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
         f"{safe_symbol}-YFin-data-{start_str}-{end_str}.csv",
     )
 
-    if os.path.exists(data_file):
-        data = pd.read_csv(data_file, on_bad_lines="skip", encoding="utf-8")
-    else:
-        data = yf_retry(lambda: yf.download(
-            symbol,
-            start=start_str,
-            end=end_str,
-            multi_level_index=False,
-            progress=False,
-            auto_adjust=True,
-        ))
-        data = data.reset_index()
+    data = _read_cached_ohlcv(data_file) if os.path.exists(data_file) else None
+    if data is None:
+        data = _download_ohlcv(symbol, start_str, end_str)
         data.to_csv(data_file, index=False, encoding="utf-8")
 
     data = _clean_dataframe(data)
 
+    if data.empty:
+        raise ValueError(f"No usable OHLCV rows available for {symbol} on or before {curr_date}")
+
     # Filter to curr_date to prevent look-ahead bias in backtesting
     data = data[data["Date"] <= curr_date_dt]
+
+    if data.empty:
+        raise ValueError(f"No OHLCV rows remain for {symbol} on or before {curr_date}")
 
     return data
 
