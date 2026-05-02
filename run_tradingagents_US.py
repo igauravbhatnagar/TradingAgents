@@ -8,27 +8,36 @@ if BASE_DIR not in sys.path:
 
 from cli import main as trading_main
 
-
 INPUT_DIR = os.path.join(BASE_DIR, "Output", "Tradesetups_finder", "US", "csv_data")
 OUTPUT_DIR = os.path.join(BASE_DIR, "Output", "TradingAgents")
+
+# Read secrets from the environment.
+# Set these before running the script, for example:
+# PowerShell:
+#   $env:GOOGLE_API_KEY="your_google_api_key"
+#   $env:TELEGRAM_BOT_TOKEN="your_telegram_bot_token"
+#   $env:TELEGRAM_CHAT_ID="your_telegram_chat_id"
+# CMD:
+#   set GOOGLE_API_KEY=your_google_api_key
+#   set TELEGRAM_BOT_TOKEN=your_telegram_bot_token
+#   set TELEGRAM_CHAT_ID=your_telegram_chat_id
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 
-
-if TELEGRAM_BOT_TOKEN:
-    os.environ["TELEGRAM_BOT_TOKEN"] = TELEGRAM_BOT_TOKEN
-if TELEGRAM_CHAT_ID:
-    os.environ["TELEGRAM_CHAT_ID"] = TELEGRAM_CHAT_ID
 if GOOGLE_API_KEY:
     os.environ["GOOGLE_API_KEY"] = GOOGLE_API_KEY
 
-os.environ["TELEGRAM_ENABLED"] = "true"
-
+telegram_enabled = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
+if telegram_enabled:
+    os.environ["TELEGRAM_BOT_TOKEN"] = TELEGRAM_BOT_TOKEN
+    os.environ["TELEGRAM_CHAT_ID"] = TELEGRAM_CHAT_ID
+    os.environ["TELEGRAM_ENABLED"] = "true"
+else:
+    os.environ["TELEGRAM_ENABLED"] = "false"
 
 sys.argv = [
     "run_tradingagents_US.py",
-    "analyze",
     "--input-mode",
     "file",
     "--country",
@@ -52,6 +61,5 @@ sys.argv = [
     "--output-language",
     "English",
 ]
-
 
 trading_main.main()

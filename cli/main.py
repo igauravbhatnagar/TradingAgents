@@ -1,5 +1,6 @@
 from typing import Any, Optional
 import datetime
+import sys
 import typer
 from pathlib import Path
 from functools import wraps
@@ -1616,6 +1617,8 @@ def analyze(
 
 
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "analyze":
+        sys.argv = [sys.argv[0], *sys.argv[2:]]
     app()
 
 
