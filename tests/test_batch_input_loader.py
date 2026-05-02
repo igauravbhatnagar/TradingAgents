@@ -32,6 +32,16 @@ class TestBatchInputLoader:
 
         assert load_tickers_from_file(file_path) == ["AAPL", "MSFT", "NVDA"]
 
+    def test_load_tickers_from_file_adds_ns_suffix_for_india(self, tmp_path: Path):
+        file_path = tmp_path / "india.csv"
+        file_path.write_text("Symbol\nRELIANCE\nTCS.NS\nINFY\n", encoding="utf-8")
+
+        assert load_tickers_from_file(file_path, country="INDIA") == [
+            "RELIANCE.NS",
+            "TCS.NS",
+            "INFY.NS",
+        ]
+
     def test_folder_mode_reads_latest_files(self, tmp_path: Path):
         older = tmp_path / "older.csv"
         newer = tmp_path / "newer.csv"
@@ -80,3 +90,15 @@ class TestBatchInputLoader:
         assert resolved_path == default_dir
         assert selected_files == [csv_file]
         assert tickers == ["TSLA"]
+
+    def test_load_tickers_from_source_applies_india_suffix(self, tmp_path: Path):
+        csv_file = tmp_path / "tickers.csv"
+        csv_file.write_text("Symbol\nSBIN\nHDFCBANK\n", encoding="utf-8")
+
+        resolved_path, selected_files, tickers = load_tickers_from_source(
+            "INDIA", str(csv_file)
+        )
+
+        assert resolved_path == csv_file
+        assert selected_files == [csv_file]
+        assert tickers == ["SBIN.NS", "HDFCBANK.NS"]
