@@ -199,6 +199,15 @@ class TradingAgentsGraph:
         """
         try:
             start = datetime.strptime(trade_date, "%Y-%m-%d")
+            today = datetime.now().date()
+
+            # Do not ask yfinance for outcomes that cannot exist yet.
+            # This avoids noisy "possibly delisted" messages for pending entries
+            # that are dated today, in the future, or still inside the holding
+            # window we need to evaluate.
+            if start.date() >= today or (start + timedelta(days=holding_days)).date() > today:
+                return None, None, None
+
             end = start + timedelta(days=holding_days + 7)  # buffer for weekends/holidays
             end_str = end.strftime("%Y-%m-%d")
 
