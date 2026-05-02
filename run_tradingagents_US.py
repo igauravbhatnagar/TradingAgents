@@ -71,7 +71,7 @@ def _build_argv(input_dir: str, output_dir: str) -> list[str]:
         "--quick-model", "gemini-2.5-flash",
         "--deep-model", "gemini-3.1-pro-preview",
         "--research-depth", "1",
-        "--analysts", "market,social,news,fundamentals",
+        "--analysts", "market,news,fundamentals",
         "--output-language", "English",
     ]
 
