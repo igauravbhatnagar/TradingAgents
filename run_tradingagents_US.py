@@ -20,7 +20,7 @@ def _configure_environment() -> None:
     google_api_key = os.getenv("GOOGLE_API_KEY", "")
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
-    min_mcap = os.getenv("TRADINGAGENTS_MIN_MCAP", "1B")
+    min_mcap = os.getenv("TRADINGAGENTS_MIN_MCAP", "2B")
 
     if google_api_key:
         os.environ["GOOGLE_API_KEY"] = google_api_key
@@ -96,7 +96,7 @@ def main() -> None:
     print("INPUT_DIR:", input_dir)
     print("INPUT EXISTS:", os.path.exists(input_dir))
     print("OUTPUT_DIR:", output_dir)
-    print("MIN_MCAP:", os.getenv("TRADINGAGENTS_MIN_MCAP", "1B"))
+    print("MIN_MCAP:", os.getenv("TRADINGAGENTS_MIN_MCAP", "2B"))
 
     _configure_environment()
     _validate_paths(input_dir, output_dir)

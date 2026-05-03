@@ -20,7 +20,7 @@ def _configure_environment() -> None:
     google_api_key = os.getenv("GOOGLE_API_KEY", "")
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
-    min_mcap = os.getenv("TRADINGAGENTS_MIN_MCAP", "1B")
+    min_mcap = os.getenv("TRADINGAGENTS_MIN_MCAP", "500M")
 
     if google_api_key:
         os.environ["GOOGLE_API_KEY"] = google_api_key
@@ -78,7 +78,7 @@ def _build_argv(input_dir: str, output_dir: str) -> list[str]:
         "--analysts", "market,news,fundamentals",
         "--output-language", "English",
     ]
-    min_mcap = os.getenv("TRADINGAGENTS_MIN_MCAP", "1B")
+    min_mcap = os.getenv("TRADINGAGENTS_MIN_MCAP", "500M")
     if min_mcap:
         argv.extend(["--min-mcap", min_mcap])
     return argv
