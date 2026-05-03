@@ -1,8 +1,9 @@
 import datetime
+from pathlib import Path
 
 import pytest
 
-from cli.main import build_batch_run_folder_name
+from cli.main import build_batch_run_folder_name, run_batch_analysis
 from cli.summary import BatchTickerResult, build_result_details, build_summary_table, summarize_final_decision
 from cli.telegram import build_completion_message, build_start_message
 
@@ -65,6 +66,7 @@ class TestBatchSummary:
     def test_build_start_message_contains_run_metadata(self):
         message = build_start_message(
             input_path="Output/Tradesetups_finder/us/csv_data",
+            input_files=["C:/tmp/one.csv", "C:/tmp/two.csv"],
             input_mode="file",
             country="us",
             start_time="2026-05-02 09:00:00",
@@ -72,13 +74,16 @@ class TestBatchSummary:
         )
 
         assert "TradingAgents batch run started" in message
+        assert "🚀" in message
         assert "Country: us" in message
+        assert "Input files: one.csv, two.csv" in message
         assert "AAPL, MSFT" in message
 
     def test_build_completion_message_contains_summary_sections(self):
         message = build_completion_message(
             status="SUCCESS",
             input_path="Output/Tradesetups_finder/us/csv_data",
+            input_files=["C:/tmp/tickers.csv"],
             input_mode="file",
             country="us",
             start_time="2026-05-02 09:00:00",
@@ -89,8 +94,12 @@ class TestBatchSummary:
         )
 
         assert "TradingAgents batch run SUCCESS" in message
+        assert "✅" in message
         assert "Summary Table" in message
         assert "Results" in message
+        assert "Input files: tickers.csv" in message
+        assert "View complete_report.md" not in message
+        assert "Download" not in message
 
     def test_build_batch_run_folder_name_is_bounded(self):
         started_at = datetime.datetime(2026, 5, 2, 9, 15, 0)
@@ -100,3 +109,58 @@ class TestBatchSummary:
         assert folder_name.startswith("20260502_091500_")
         assert "123tickers" in folder_name
         assert len(folder_name) <= 50
+
+    def test_run_batch_analysis_dispatches_single_basket_run(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        selections = {
+            "analysis_date": "2026-05-02",
+            "research_depth": 1,
+            "llm_provider": "google",
+            "backend_url": None,
+            "shallow_thinker": "gemini-2.5-flash",
+            "deep_thinker": "gemini-3.1-pro-preview",
+            "analysts": [],
+            "output_language": "English",
+            "results_dir": str(tmp_path),
+            "telegram_enabled": False,
+        }
+        calls: list[dict] = []
+
+        monkeypatch.setattr("cli.main.resolve_input_path", lambda country, input_path: Path("resolved.csv"))
+        monkeypatch.setattr(
+            "cli.main.load_tickers_from_source",
+            lambda country, input_path, latest_files=1, min_mcap=None: (
+                Path("resolved.csv"),
+                [Path("tickers.csv")],
+                ["AAPL", "MSFT", "NVDA"],
+            ),
+        )
+
+        def fake_run_single_background_analysis(run_selections, *, checkpoint=False):
+            calls.append(dict(run_selections))
+            return BatchTickerResult(
+                ticker=run_selections["result_label"],
+                analysis_date=run_selections["analysis_date"],
+                status="success",
+                rating="Buy",
+            )
+
+        monkeypatch.setattr(
+            "cli.main.run_single_background_analysis",
+            fake_run_single_background_analysis,
+        )
+
+        results = run_batch_analysis(
+            selections,
+            country="US",
+            input_path="tickers.csv",
+            latest_files=1,
+            min_mcap="1B",
+            checkpoint=False,
+        )
+
+        assert len(calls) == 1
+        assert calls[0]["ticker"] == "AAPL, MSFT, NVDA"
+        assert calls[0]["run_label"] == "basket_us_3"
+        assert calls[0]["result_label"] == "US basket (3 tickers)"
+        assert len(results) == 1
+        assert results[0].ticker == "US basket (3 tickers)"

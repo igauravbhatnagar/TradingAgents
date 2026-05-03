@@ -3,6 +3,7 @@
 import pytest
 import pandas as pd
 from unittest.mock import MagicMock, patch
+from datetime import datetime
 
 from tradingagents.agents.utils.memory import TradingMemoryLog
 from tradingagents.agents.schemas import PortfolioDecision, PortfolioRating
@@ -509,6 +510,16 @@ class TestDeferredReflection:
             mock_ticker_cls.return_value = m
             raw, alpha, days = TradingAgentsGraph._fetch_returns(mock_graph, "NVDA", "2026-04-19")
         assert raw is None and alpha is None and days is None
+
+    def test_fetch_returns_future_or_unmatured_date_skips_yfinance(self):
+        mock_graph = MagicMock(spec=TradingAgentsGraph)
+        future_date = (datetime.now().date()).strftime("%Y-%m-%d")
+
+        with patch("yfinance.Ticker") as mock_ticker_cls:
+            raw, alpha, days = TradingAgentsGraph._fetch_returns(mock_graph, "NVDA", future_date)
+
+        assert raw is None and alpha is None and days is None
+        mock_ticker_cls.assert_not_called()
 
     def test_fetch_returns_delisted(self):
         """Empty DataFrame → returns (None, None, None), no crash."""

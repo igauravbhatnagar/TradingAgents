@@ -1,5 +1,6 @@
 from typing import Any, Optional
 import datetime
+import sys
 import typer
 from pathlib import Path
 from functools import wraps
@@ -33,7 +34,12 @@ from cli.announcements import fetch_announcements, display_announcements
 from cli.input_loader import InputLoadError, load_tickers_from_source, resolve_input_path
 from cli.stats_handler import StatsCallbackHandler
 from cli.summary import BatchTickerResult, build_result_details, build_summary_table, summarize_final_decision
-from cli.telegram import TelegramConfig, TelegramNotifier, build_completion_message, build_start_message
+from cli.telegram import (
+    TelegramConfig,
+    TelegramNotifier,
+    build_completion_message,
+    build_start_message,
+)
 
 console = Console()
 
@@ -652,6 +658,16 @@ def build_batch_run_folder_name(
     return name[:max_len].rstrip("_-")
 
 
+def build_basket_ticker_input(tickers: list[str]) -> str:
+    return ", ".join(tickers)
+
+
+def build_basket_run_label(country: str, ticker_count: int, max_len: int = 32) -> str:
+    safe_country = re.sub(r"[^A-Za-z0-9]+", "_", country.strip().lower()).strip("_") or "na"
+    name = f"basket_{safe_country}_{ticker_count}"
+    return name[:max_len].rstrip("_-")
+
+
 def parse_analyst_selection(raw_value: str | None) -> list[AnalystType]:
     if not raw_value:
         return [
@@ -745,6 +761,8 @@ def build_config_from_selections(selections: dict[str, Any], checkpoint: bool = 
     config["telegram_enabled"] = bool(
         selections.get("telegram_enabled") or config.get("telegram_enabled")
     )
+    if selections.get("run_label"):
+        config["run_label"] = selections["run_label"]
     if selections.get("results_dir"):
         config["results_dir"] = selections["results_dir"]
     return config
@@ -782,6 +800,8 @@ def run_single_background_analysis(
     checkpoint: bool = False,
 ) -> BatchTickerResult:
     ticker = selections["ticker"]
+    result_label = selections.get("result_label") or ticker
+    run_label = selections.get("run_label") or result_label
     analysis_date = selections["analysis_date"]
     config = build_config_from_selections(selections, checkpoint=checkpoint)
     selected_analyst_keys = normalize_selected_analyst_keys(selections["analysts"])
@@ -793,14 +813,14 @@ def run_single_background_analysis(
             debug=False,
         )
         final_state, _ = graph.propagate(ticker, analysis_date)
-        results_dir = Path(config["results_dir"]) / ticker / analysis_date
+        results_dir = Path(config["results_dir"]) / run_label / analysis_date
         results_dir.mkdir(parents=True, exist_ok=True)
-        report_file = save_report_to_disk(final_state, ticker, results_dir / "saved_report")
+        report_file = save_report_to_disk(final_state, result_label, results_dir / "saved_report")
         rating, key_points, pm_decision = summarize_final_decision(
             final_state["final_trade_decision"]
         )
         return BatchTickerResult(
-            ticker=ticker,
+            ticker=result_label,
             analysis_date=analysis_date,
             status="success",
             rating=rating,
@@ -810,7 +830,7 @@ def run_single_background_analysis(
         )
     except Exception as exc:
         return BatchTickerResult(
-            ticker=ticker,
+            ticker=result_label,
             analysis_date=analysis_date,
             status="failed",
             error=str(exc),
@@ -823,6 +843,7 @@ def run_batch_analysis(
     country: str,
     input_path: str | None,
     latest_files: int,
+    min_mcap: str | None = None,
     checkpoint: bool = False,
 ) -> list[BatchTickerResult]:
     config = build_config_from_selections(base_selections, checkpoint=checkpoint)
@@ -836,6 +857,7 @@ def run_batch_analysis(
             country,
             input_path,
             latest_files=latest_files,
+            min_mcap=min_mcap,
         )
         base_output_dir = base_selections.get("results_dir")
         if not base_output_dir:
@@ -849,6 +871,7 @@ def run_batch_analysis(
             notifier,
             build_start_message(
                 input_path=str(resolved_input),
+                input_files=[str(path) for path in selected_files],
                 input_mode="file",
                 country=country,
                 start_time=start_time_text,
@@ -862,21 +885,26 @@ def run_batch_analysis(
         )
         console.print(f"[cyan]Batch output directory:[/cyan] {run_output_dir}")
 
-        results: list[BatchTickerResult] = []
-        for ticker in tickers:
-            ticker_selections = dict(base_selections)
-            ticker_selections["ticker"] = ticker
-            ticker_selections["results_dir"] = str(run_output_dir)
-            console.print(f"[blue]Running analysis for[/blue] {ticker}")
-            result = run_single_background_analysis(
-                ticker_selections,
-                checkpoint=checkpoint,
-            )
-            results.append(result)
-            if result.status == "success":
-                console.print(f"[green]Completed[/green] {ticker} ({result.rating})")
-            else:
-                console.print(f"[red]Failed[/red] {ticker}: {result.error}")
+        basket_ticker_input = build_basket_ticker_input(tickers)
+        basket_result_label = f"{country.upper()} basket ({len(tickers)} tickers)"
+        basket_run_label = build_basket_run_label(country, len(tickers))
+
+        ticker_selections = dict(base_selections)
+        ticker_selections["ticker"] = basket_ticker_input
+        ticker_selections["results_dir"] = str(run_output_dir)
+        ticker_selections["run_label"] = basket_run_label
+        ticker_selections["result_label"] = basket_result_label
+
+        console.print(f"[blue]Running basket analysis for[/blue] {basket_ticker_input}")
+        result = run_single_background_analysis(
+            ticker_selections,
+            checkpoint=checkpoint,
+        )
+        results = [result]
+        if result.status == "success":
+            console.print(f"[green]Completed[/green] {basket_result_label} ({result.rating})")
+        else:
+            console.print(f"[red]Failed[/red] {basket_result_label}: {result.error}")
 
         ended_at = datetime.datetime.now()
         status = "SUCCESS" if all(result.status == "success" for result in results) else "PARTIAL FAILURE"
@@ -885,6 +913,7 @@ def run_batch_analysis(
             build_completion_message(
                 status=status,
                 input_path=str(resolved_input),
+                input_files=[str(path) for path in selected_files],
                 input_mode="file",
                 country=country,
                 start_time=start_time_text,
@@ -908,6 +937,7 @@ def run_batch_analysis(
             build_completion_message(
                 status="FAILED",
                 input_path=str(resolved_input),
+                input_files=[str(path) for path in selected_files] if "selected_files" in locals() else [],
                 input_mode="file",
                 country=country,
                 start_time=start_time_text,
@@ -1556,6 +1586,11 @@ def analyze(
         "--telegram",
         help="Enable Telegram notifications for this run.",
     ),
+    min_mcap: Optional[str] = typer.Option(
+        None,
+        "--min-mcap",
+        help="Optional minimum market cap filter for CSV inputs, for example 1B or 750M.",
+    ),
     checkpoint: bool = typer.Option(
         False,
         "--checkpoint",
@@ -1603,6 +1638,7 @@ def analyze(
             country=country,
             input_path=input_path,
             latest_files=latest_files,
+            min_mcap=min_mcap,
             checkpoint=checkpoint,
         )
     except InputLoadError as exc:
@@ -1616,6 +1652,8 @@ def analyze(
 
 
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "analyze":
+        sys.argv = [sys.argv[0], *sys.argv[2:]]
     app()
 
 

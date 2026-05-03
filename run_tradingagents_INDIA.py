@@ -65,9 +65,9 @@ def _check_required_modules() -> None:
 
 def _build_argv(input_dir: str, output_dir: str) -> list[str]:
     argv = [
-        "run_tradingagents_US.py",
+        "run_tradingagents_INDIA.py",
         "--input-mode", "file",
-        "--country", "US",
+        "--country", "INDIA",
         "--input-path", input_dir,
         "--output-dir", output_dir,
         "--latest-files", "1",
@@ -88,8 +88,8 @@ def main() -> None:
     _ensure_import_path()
 
     # ✅ FIXED PATHS (no duplicate colab-notebooks)
-    input_dir = os.path.join(BASE_DIR, "colab-notebooks", "Output", "Tradesetups_finder", "US", "csv_data")
-    output_dir = os.path.join(BASE_DIR, "colab-notebooks", "Output", "TradingAgents", "US")
+    input_dir = os.path.join(BASE_DIR, "colab-notebooks", "Output", "Tradesetups_finder", "INDIA", "csv_data")
+    output_dir = os.path.join(BASE_DIR, "colab-notebooks", "Output", "TradingAgents", "INDIA")
 
     print("SCRIPT_DIR:", SCRIPT_DIR)
     print("BASE_DIR:", BASE_DIR)
