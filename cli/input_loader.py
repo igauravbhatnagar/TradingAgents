@@ -45,7 +45,55 @@ def _dedupe_tickers(values: Iterable[str], country: str | None = None) -> list[s
     return tickers
 
 
-def _load_symbol_column(file_path: Path, country: str | None = None) -> list[str]:
+def _parse_mcap_value(value: str | int | float) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if not isinstance(value, str):
+        return None
+
+    cleaned = value.strip().upper().replace(",", "").replace("$", "")
+    if not cleaned:
+        return None
+
+    multipliers = {
+        "T": 1_000_000_000_000,
+        "B": 1_000_000_000,
+        "M": 1_000_000,
+        "K": 1_000,
+    }
+    suffix = cleaned[-1]
+    multiplier = multipliers.get(suffix)
+    numeric_part = cleaned[:-1] if multiplier else cleaned
+
+    try:
+        parsed = float(numeric_part)
+    except ValueError:
+        return None
+
+    if multiplier:
+        parsed *= multiplier
+    return parsed
+
+
+def _row_mcap_value(row: dict[str | None, str | list[str]]) -> str:
+    base_value = row.get("MCAP", "")
+    if isinstance(base_value, list):
+        parts = [part.strip() for part in base_value if part and part.strip()]
+    else:
+        parts = [str(base_value).strip()] if str(base_value).strip() else []
+
+    overflow = row.get(None)
+    if isinstance(overflow, list):
+        parts.extend(part.strip() for part in overflow if part and part.strip())
+
+    return "".join(parts)
+
+
+def _load_symbol_column(
+    file_path: Path,
+    country: str | None = None,
+    min_mcap: str | None = None,
+) -> list[str]:
     with file_path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
         if not reader.fieldnames:
@@ -54,10 +102,41 @@ def _load_symbol_column(file_path: Path, country: str | None = None) -> list[str
             raise InputLoadError(
                 f"CSV file does not contain required 'Symbol' column: {file_path}"
             )
-        return _dedupe_tickers((row.get("Symbol", "") for row in reader), country=country)
+
+        threshold = None
+        if min_mcap is not None:
+            if "MCAP" not in reader.fieldnames:
+                raise InputLoadError(
+                    f"CSV file does not contain required 'MCAP' column for --min-mcap: {file_path}"
+                )
+            threshold = _parse_mcap_value(min_mcap)
+            if threshold is None:
+                raise InputLoadError(
+                    f"Invalid --min-mcap value: {min_mcap}. Expected formats like 1B, 750M, or 1200000000."
+                )
+
+        symbols: list[str] = []
+        for row in reader:
+            symbol = row.get("Symbol", "")
+            if threshold is not None:
+                mcap_value = _parse_mcap_value(_row_mcap_value(row))
+                if mcap_value is None or mcap_value <= threshold:
+                    continue
+            symbols.append(symbol)
+
+        return _dedupe_tickers(symbols, country=country)
 
 
-def _load_delimited_text(file_path: Path, country: str | None = None) -> list[str]:
+def _load_delimited_text(
+    file_path: Path,
+    country: str | None = None,
+    min_mcap: str | None = None,
+) -> list[str]:
+    if min_mcap is not None:
+        raise InputLoadError(
+            f"--min-mcap can only be used with CSV inputs that contain an MCAP column: {file_path}"
+        )
+
     raw_text = file_path.read_text(encoding="utf-8-sig")
     values = [part for chunk in raw_text.splitlines() for part in chunk.split(",")]
     tickers = _dedupe_tickers(values, country=country)
@@ -66,20 +145,30 @@ def _load_delimited_text(file_path: Path, country: str | None = None) -> list[st
     return tickers
 
 
-def load_tickers_from_file(file_path: Path, country: str | None = None) -> list[str]:
+def load_tickers_from_file(
+    file_path: Path,
+    country: str | None = None,
+    min_mcap: str | None = None,
+) -> list[str]:
     if not file_path.exists() or not file_path.is_file():
         raise InputLoadError(f"Input file does not exist: {file_path}")
 
     if file_path.suffix.lower() == ".csv":
         try:
-            tickers = _load_symbol_column(file_path, country=country)
+            tickers = _load_symbol_column(file_path, country=country, min_mcap=min_mcap)
             if tickers:
                 return tickers
+            if min_mcap is not None:
+                raise InputLoadError(
+                    f"No tickers matched --min-mcap {min_mcap} in input file: {file_path}"
+                )
         except InputLoadError:
+            if min_mcap is not None:
+                raise
             # Allow a plain comma-separated ticker file even when the extension is .csv.
             pass
 
-    return _load_delimited_text(file_path, country=country)
+    return _load_delimited_text(file_path, country=country, min_mcap=min_mcap)
 
 
 def _csv_files_sorted(folder_path: Path) -> list[Path]:
@@ -91,7 +180,10 @@ def _csv_files_sorted(folder_path: Path) -> list[Path]:
 
 
 def load_tickers_from_folder(
-    folder_path: Path, latest_files: int = 1, country: str | None = None
+    folder_path: Path,
+    latest_files: int = 1,
+    country: str | None = None,
+    min_mcap: str | None = None,
 ) -> tuple[list[Path], list[str]]:
     if latest_files < 1:
         raise InputLoadError("latest_files must be at least 1")
@@ -105,10 +197,14 @@ def load_tickers_from_folder(
     selected_files = csv_files[:latest_files]
     tickers: list[str] = []
     for file_path in selected_files:
-        tickers.extend(_load_symbol_column(file_path, country=country))
+        tickers.extend(_load_symbol_column(file_path, country=country, min_mcap=min_mcap))
 
     deduped = _dedupe_tickers(tickers, country=country)
     if not deduped:
+        if min_mcap is not None:
+            raise InputLoadError(
+                f"No tickers matched --min-mcap {min_mcap} across selected CSV files in: {folder_path}"
+            )
         raise InputLoadError(f"No tickers found across selected CSV files in: {folder_path}")
     return selected_files, deduped
 
@@ -117,12 +213,16 @@ def load_tickers_from_source(
     country: str,
     input_path: str | None,
     latest_files: int = 1,
+    min_mcap: str | None = None,
 ) -> tuple[Path, list[Path], list[str]]:
     resolved_path = resolve_input_path(country, input_path)
     if resolved_path.is_dir() or (not resolved_path.exists() and input_path is None):
         selected_files, tickers = load_tickers_from_folder(
-            resolved_path, latest_files=latest_files, country=country
+            resolved_path,
+            latest_files=latest_files,
+            country=country,
+            min_mcap=min_mcap,
         )
         return resolved_path, selected_files, tickers
-    tickers = load_tickers_from_file(resolved_path, country=country)
+    tickers = load_tickers_from_file(resolved_path, country=country, min_mcap=min_mcap)
     return resolved_path, [resolved_path], tickers

@@ -39,7 +39,6 @@ DEFAULT_CONFIG = {
     "telegram_enabled": _env_bool("TELEGRAM_ENABLED", False),
     "telegram_bot_token": os.getenv("TELEGRAM_BOT_TOKEN"),
     "telegram_chat_id": os.getenv("TELEGRAM_CHAT_ID"),
-    "public_base_url": os.getenv("TRADINGAGENTS_PUBLIC_BASE_URL"),
     # Output language for analyst reports and final decision
     # Internal agent debate stays in English for reasoning quality
     "output_language": "English",

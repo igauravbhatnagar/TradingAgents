@@ -42,6 +42,29 @@ class TestBatchInputLoader:
             "INFY.NS",
         ]
 
+    def test_load_tickers_from_file_filters_by_mcap_strictly_greater_than_threshold(self, tmp_path: Path):
+        file_path = tmp_path / "setup.csv"
+        file_path.write_text(
+            "Symbol,MCAP\nAAPL,2B\nMSFT,1B\nNVDA,$1,500,000,000\nSMALL,750M\n",
+            encoding="utf-8",
+        )
+
+        assert load_tickers_from_file(file_path, min_mcap="1B") == ["AAPL", "NVDA"]
+
+    def test_load_tickers_from_file_requires_mcap_column_when_filter_is_used(self, tmp_path: Path):
+        file_path = tmp_path / "setup.csv"
+        file_path.write_text("Symbol,Other\nAAPL,1\n", encoding="utf-8")
+
+        with pytest.raises(InputLoadError, match="MCAP"):
+            load_tickers_from_file(file_path, min_mcap="1B")
+
+    def test_load_tickers_from_file_rejects_min_mcap_for_non_csv_input(self, tmp_path: Path):
+        file_path = tmp_path / "tickers.txt"
+        file_path.write_text("aapl, msft", encoding="utf-8")
+
+        with pytest.raises(InputLoadError, match="--min-mcap"):
+            load_tickers_from_file(file_path, min_mcap="1B")
+
     def test_folder_mode_reads_latest_files(self, tmp_path: Path):
         older = tmp_path / "older.csv"
         newer = tmp_path / "newer.csv"
@@ -102,3 +125,18 @@ class TestBatchInputLoader:
         assert resolved_path == csv_file
         assert selected_files == [csv_file]
         assert tickers == ["SBIN.NS", "HDFCBANK.NS"]
+
+    def test_load_tickers_from_source_applies_mcap_filter(self, tmp_path: Path):
+        csv_file = tmp_path / "tickers.csv"
+        csv_file.write_text(
+            "Symbol,MCAP\nLARGE,5B\nMID,1.2B\nSMALL,500M\n",
+            encoding="utf-8",
+        )
+
+        resolved_path, selected_files, tickers = load_tickers_from_source(
+            "US", str(csv_file), min_mcap="1B"
+        )
+
+        assert resolved_path == csv_file
+        assert selected_files == [csv_file]
+        assert tickers == ["LARGE", "MID"]

@@ -38,7 +38,6 @@ from cli.telegram import (
     TelegramConfig,
     TelegramNotifier,
     build_completion_message,
-    build_report_links,
     build_start_message,
 )
 
@@ -844,6 +843,7 @@ def run_batch_analysis(
     country: str,
     input_path: str | None,
     latest_files: int,
+    min_mcap: str | None = None,
     checkpoint: bool = False,
 ) -> list[BatchTickerResult]:
     config = build_config_from_selections(base_selections, checkpoint=checkpoint)
@@ -857,6 +857,7 @@ def run_batch_analysis(
             country,
             input_path,
             latest_files=latest_files,
+            min_mcap=min_mcap,
         )
         base_output_dir = base_selections.get("results_dir")
         if not base_output_dir:
@@ -870,6 +871,7 @@ def run_batch_analysis(
             notifier,
             build_start_message(
                 input_path=str(resolved_input),
+                input_files=[str(path) for path in selected_files],
                 input_mode="file",
                 country=country,
                 start_time=start_time_text,
@@ -911,6 +913,7 @@ def run_batch_analysis(
             build_completion_message(
                 status=status,
                 input_path=str(resolved_input),
+                input_files=[str(path) for path in selected_files],
                 input_mode="file",
                 country=country,
                 start_time=start_time_text,
@@ -918,11 +921,6 @@ def run_batch_analysis(
                 run_time=format_runtime(started_at, ended_at),
                 summary_table=build_summary_table(results),
                 details=build_result_details(results),
-                report_links=build_report_links(
-                    results,
-                    results_dir=config.get("results_dir"),
-                    public_base_url=config.get("public_base_url"),
-                ),
             ),
         )
         return results
@@ -939,6 +937,7 @@ def run_batch_analysis(
             build_completion_message(
                 status="FAILED",
                 input_path=str(resolved_input),
+                input_files=[str(path) for path in selected_files] if "selected_files" in locals() else [],
                 input_mode="file",
                 country=country,
                 start_time=start_time_text,
@@ -946,11 +945,6 @@ def run_batch_analysis(
                 run_time=format_runtime(started_at, ended_at),
                 summary_table=build_summary_table([failure_result]),
                 details=build_result_details([failure_result]),
-                report_links=build_report_links(
-                    [failure_result],
-                    results_dir=config.get("results_dir"),
-                    public_base_url=config.get("public_base_url"),
-                ),
             ),
         )
         raise
@@ -1592,6 +1586,11 @@ def analyze(
         "--telegram",
         help="Enable Telegram notifications for this run.",
     ),
+    min_mcap: Optional[str] = typer.Option(
+        None,
+        "--min-mcap",
+        help="Optional minimum market cap filter for CSV inputs, for example 1B or 750M.",
+    ),
     checkpoint: bool = typer.Option(
         False,
         "--checkpoint",
@@ -1639,6 +1638,7 @@ def analyze(
             country=country,
             input_path=input_path,
             latest_files=latest_files,
+            min_mcap=min_mcap,
             checkpoint=checkpoint,
         )
     except InputLoadError as exc:
