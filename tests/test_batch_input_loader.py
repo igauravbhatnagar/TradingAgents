@@ -51,6 +51,15 @@ class TestBatchInputLoader:
 
         assert load_tickers_from_file(file_path, min_mcap="1B") == ["AAPL", "NVDA"]
 
+    def test_load_tickers_from_file_accepts_mixed_case_mcap_header(self, tmp_path: Path):
+        file_path = tmp_path / "setup.csv"
+        file_path.write_text(
+            "Symbol,MCap\nAAPL,2B\nMSFT,1B\nSMALL,750M\n",
+            encoding="utf-8",
+        )
+
+        assert load_tickers_from_file(file_path, min_mcap="1B") == ["AAPL"]
+
     def test_load_tickers_from_file_requires_mcap_column_when_filter_is_used(self, tmp_path: Path):
         file_path = tmp_path / "setup.csv"
         file_path.write_text("Symbol,Other\nAAPL,1\n", encoding="utf-8")

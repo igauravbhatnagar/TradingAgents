@@ -45,6 +45,14 @@ def _dedupe_tickers(values: Iterable[str], country: str | None = None) -> list[s
     return tickers
 
 
+def _find_fieldname(fieldnames: Iterable[str | None], expected_name: str) -> str | None:
+    expected = expected_name.strip().lower()
+    for fieldname in fieldnames:
+        if fieldname and fieldname.strip().lower() == expected:
+            return fieldname
+    return None
+
+
 def _parse_mcap_value(value: str | int | float) -> float | None:
     if isinstance(value, (int, float)):
         return float(value)
@@ -75,8 +83,11 @@ def _parse_mcap_value(value: str | int | float) -> float | None:
     return parsed
 
 
-def _row_mcap_value(row: dict[str | None, str | list[str]]) -> str:
-    base_value = row.get("MCAP", "")
+def _row_mcap_value(
+    row: dict[str | None, str | list[str]],
+    mcap_fieldname: str,
+) -> str:
+    base_value = row.get(mcap_fieldname, "")
     if isinstance(base_value, list):
         parts = [part.strip() for part in base_value if part and part.strip()]
     else:
@@ -98,14 +109,17 @@ def _load_symbol_column(
         reader = csv.DictReader(handle)
         if not reader.fieldnames:
             raise InputLoadError(f"CSV file is empty: {file_path}")
-        if "Symbol" not in reader.fieldnames:
+        symbol_fieldname = _find_fieldname(reader.fieldnames, "Symbol")
+        if not symbol_fieldname:
             raise InputLoadError(
                 f"CSV file does not contain required 'Symbol' column: {file_path}"
             )
 
         threshold = None
+        mcap_fieldname = None
         if min_mcap is not None:
-            if "MCAP" not in reader.fieldnames:
+            mcap_fieldname = _find_fieldname(reader.fieldnames, "MCAP")
+            if not mcap_fieldname:
                 raise InputLoadError(
                     f"CSV file does not contain required 'MCAP' column for --min-mcap: {file_path}"
                 )
@@ -117,9 +131,9 @@ def _load_symbol_column(
 
         symbols: list[str] = []
         for row in reader:
-            symbol = row.get("Symbol", "")
+            symbol = row.get(symbol_fieldname, "")
             if threshold is not None:
-                mcap_value = _parse_mcap_value(_row_mcap_value(row))
+                mcap_value = _parse_mcap_value(_row_mcap_value(row, mcap_fieldname))
                 if mcap_value is None or mcap_value <= threshold:
                     continue
             symbols.append(symbol)
