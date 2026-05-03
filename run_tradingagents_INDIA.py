@@ -21,12 +21,15 @@ def _configure_environment() -> None:
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
     min_mcap = os.getenv("TRADINGAGENTS_MIN_MCAP", "500M")
+    basket_chunk_size = os.getenv("TRADINGAGENTS_BASKET_CHUNK_SIZE", "8")
 
     if google_api_key:
         os.environ["GOOGLE_API_KEY"] = google_api_key
 
     if min_mcap:
         os.environ["TRADINGAGENTS_MIN_MCAP"] = min_mcap
+    if basket_chunk_size:
+        os.environ["TRADINGAGENTS_BASKET_CHUNK_SIZE"] = basket_chunk_size
 
     telegram_enabled = bool(telegram_bot_token and telegram_chat_id)
     os.environ["TELEGRAM_ENABLED"] = "true" if telegram_enabled else "false"
@@ -79,8 +82,11 @@ def _build_argv(input_dir: str, output_dir: str) -> list[str]:
         "--output-language", "English",
     ]
     min_mcap = os.getenv("TRADINGAGENTS_MIN_MCAP", "500M")
+    basket_chunk_size = os.getenv("TRADINGAGENTS_BASKET_CHUNK_SIZE", "8")
     if min_mcap:
         argv.extend(["--min-mcap", min_mcap])
+    if basket_chunk_size:
+        argv.extend(["--basket-chunk-size", basket_chunk_size])
     return argv
 
 
@@ -97,6 +103,7 @@ def main() -> None:
     print("INPUT EXISTS:", os.path.exists(input_dir))
     print("OUTPUT_DIR:", output_dir)
     print("MIN_MCAP:", os.getenv("TRADINGAGENTS_MIN_MCAP", "500M"))
+    print("BASKET_CHUNK_SIZE:", os.getenv("TRADINGAGENTS_BASKET_CHUNK_SIZE", "8"))
 
     _configure_environment()
     _validate_paths(input_dir, output_dir)

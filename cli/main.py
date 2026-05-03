@@ -662,10 +662,32 @@ def build_basket_ticker_input(tickers: list[str]) -> str:
     return ", ".join(tickers)
 
 
+def chunk_tickers(tickers: list[str], chunk_size: int = 8) -> list[list[str]]:
+    if chunk_size < 1:
+        raise ValueError("chunk_size must be at least 1")
+    return [tickers[index : index + chunk_size] for index in range(0, len(tickers), chunk_size)]
+
+
 def build_basket_run_label(country: str, ticker_count: int, max_len: int = 32) -> str:
     safe_country = re.sub(r"[^A-Za-z0-9]+", "_", country.strip().lower()).strip("_") or "na"
     name = f"basket_{safe_country}_{ticker_count}"
     return name[:max_len].rstrip("_-")
+
+
+def build_chunk_run_label(country: str, total_tickers: int, chunk_index: int, chunk_count: int) -> str:
+    return f"{build_basket_run_label(country, total_tickers)}_chunk_{chunk_index}_of_{chunk_count}"
+
+
+def build_chunk_result_label(
+    country: str,
+    chunk_index: int,
+    chunk_count: int,
+    chunk_ticker_count: int,
+) -> str:
+    return (
+        f"{country.upper()} basket chunk {chunk_index}/{chunk_count} "
+        f"({chunk_ticker_count} tickers)"
+    )
 
 
 def parse_analyst_selection(raw_value: str | None) -> list[AnalystType]:
@@ -844,6 +866,7 @@ def run_batch_analysis(
     input_path: str | None,
     latest_files: int,
     min_mcap: str | None = None,
+    basket_chunk_size: int = 8,
     checkpoint: bool = False,
 ) -> list[BatchTickerResult]:
     config = build_config_from_selections(base_selections, checkpoint=checkpoint)
@@ -885,26 +908,56 @@ def run_batch_analysis(
         )
         console.print(f"[cyan]Batch output directory:[/cyan] {run_output_dir}")
 
-        basket_ticker_input = build_basket_ticker_input(tickers)
-        basket_result_label = f"{country.upper()} basket ({len(tickers)} tickers)"
-        basket_run_label = build_basket_run_label(country, len(tickers))
+        ticker_chunks = chunk_tickers(tickers, chunk_size=basket_chunk_size)
+        results: list[BatchTickerResult] = []
+        if len(ticker_chunks) > 1:
+            console.print(
+                f"[cyan]Chunking basket into[/cyan] {len(ticker_chunks)} group(s) "
+                f"of up to {basket_chunk_size} ticker(s)"
+            )
 
-        ticker_selections = dict(base_selections)
-        ticker_selections["ticker"] = basket_ticker_input
-        ticker_selections["results_dir"] = str(run_output_dir)
-        ticker_selections["run_label"] = basket_run_label
-        ticker_selections["result_label"] = basket_result_label
+        for index, ticker_chunk in enumerate(ticker_chunks, start=1):
+            basket_ticker_input = build_basket_ticker_input(ticker_chunk)
+            if len(ticker_chunks) == 1:
+                basket_result_label = f"{country.upper()} basket ({len(tickers)} tickers)"
+                basket_run_label = build_basket_run_label(country, len(tickers))
+            else:
+                basket_result_label = build_chunk_result_label(
+                    country,
+                    index,
+                    len(ticker_chunks),
+                    len(ticker_chunk),
+                )
+                basket_run_label = build_chunk_run_label(
+                    country,
+                    len(tickers),
+                    index,
+                    len(ticker_chunks),
+                )
 
-        console.print(f"[blue]Running basket analysis for[/blue] {basket_ticker_input}")
-        result = run_single_background_analysis(
-            ticker_selections,
-            checkpoint=checkpoint,
-        )
-        results = [result]
-        if result.status == "success":
-            console.print(f"[green]Completed[/green] {basket_result_label} ({result.rating})")
-        else:
-            console.print(f"[red]Failed[/red] {basket_result_label}: {result.error}")
+            ticker_selections = dict(base_selections)
+            ticker_selections["ticker"] = basket_ticker_input
+            ticker_selections["results_dir"] = str(run_output_dir)
+            ticker_selections["run_label"] = basket_run_label
+            ticker_selections["result_label"] = basket_result_label
+
+            if len(ticker_chunks) == 1:
+                console.print(f"[blue]Running basket analysis for[/blue] {basket_ticker_input}")
+            else:
+                console.print(
+                    f"[blue]Running basket chunk {index}/{len(ticker_chunks)} for[/blue] "
+                    f"{basket_ticker_input}"
+                )
+
+            result = run_single_background_analysis(
+                ticker_selections,
+                checkpoint=checkpoint,
+            )
+            results.append(result)
+            if result.status == "success":
+                console.print(f"[green]Completed[/green] {basket_result_label} ({result.rating})")
+            else:
+                console.print(f"[red]Failed[/red] {basket_result_label}: {result.error}")
 
         ended_at = datetime.datetime.now()
         status = "SUCCESS" if all(result.status == "success" for result in results) else "PARTIAL FAILURE"
@@ -1591,6 +1644,12 @@ def analyze(
         "--min-mcap",
         help="Optional minimum market cap filter for CSV inputs, for example 1B or 750M.",
     ),
+    basket_chunk_size: int = typer.Option(
+        8,
+        "--basket-chunk-size",
+        min=1,
+        help="Maximum number of tickers to analyze together in each basket chunk during file-mode runs.",
+    ),
     checkpoint: bool = typer.Option(
         False,
         "--checkpoint",
@@ -1639,6 +1698,7 @@ def analyze(
             input_path=input_path,
             latest_files=latest_files,
             min_mcap=min_mcap,
+            basket_chunk_size=basket_chunk_size,
             checkpoint=checkpoint,
         )
     except InputLoadError as exc:
