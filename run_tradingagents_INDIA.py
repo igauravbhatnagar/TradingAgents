@@ -85,7 +85,7 @@ def main() -> None:
 
     # ✅ FIXED PATHS (no duplicate colab-notebooks)
     input_dir = os.path.join(BASE_DIR, "colab-notebooks", "Output", "Tradesetups_finder", "INDIA", "csv_data")
-    output_dir = os.path.join(BASE_DIR, "colab-notebooks", "Output", "TradingAgents")
+    output_dir = os.path.join(BASE_DIR, "colab-notebooks", "Output", "TradingAgents", "INDIA")
 
     print("SCRIPT_DIR:", SCRIPT_DIR)
     print("BASE_DIR:", BASE_DIR)
