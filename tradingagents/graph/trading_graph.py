@@ -285,14 +285,15 @@ class TradingAgentsGraph:
 
         # Recompile with a checkpointer if the user opted in.
         if self.config.get("checkpoint_enabled"):
+            run_label = self.config.get("run_label", company_name)
             self._checkpointer_ctx = get_checkpointer(
-                self.config["data_cache_dir"], company_name
+                self.config["data_cache_dir"], run_label
             )
             saver = self._checkpointer_ctx.__enter__()
             self.graph = self.workflow.compile(checkpointer=saver)
 
             step = checkpoint_step(
-                self.config["data_cache_dir"], company_name, str(trade_date)
+                self.config["data_cache_dir"], run_label, str(trade_date)
             )
             if step is not None:
                 logger.info(
@@ -350,8 +351,9 @@ class TradingAgentsGraph:
 
         # Clear checkpoint on successful completion to avoid stale state.
         if self.config.get("checkpoint_enabled"):
+            run_label = self.config.get("run_label", company_name)
             clear_checkpoint(
-                self.config["data_cache_dir"], company_name, str(trade_date)
+                self.config["data_cache_dir"], run_label, str(trade_date)
             )
 
         return final_state, self.process_signal(final_state["final_trade_decision"])
@@ -390,7 +392,7 @@ class TradingAgentsGraph:
 
         # Save to file. Reject ticker values that would escape the
         # results directory when joined as a path component.
-        safe_ticker = safe_ticker_component(self.ticker)
+        safe_ticker = safe_ticker_component(self.config.get("run_label", self.ticker))
         directory = Path(self.config["results_dir"]) / safe_ticker / "TradingAgentsStrategy_logs"
         directory.mkdir(parents=True, exist_ok=True)
 
