@@ -96,7 +96,7 @@ def main() -> None:
     print("INPUT_DIR:", input_dir)
     print("INPUT EXISTS:", os.path.exists(input_dir))
     print("OUTPUT_DIR:", output_dir)
-    print("MIN_MCAP:", os.getenv("TRADINGAGENTS_MIN_MCAP", "1B"))
+    print("MIN_MCAP:", os.getenv("TRADINGAGENTS_MIN_MCAP", "500M"))
 
     _configure_environment()
     _validate_paths(input_dir, output_dir)

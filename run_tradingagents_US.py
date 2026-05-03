@@ -78,7 +78,7 @@ def _build_argv(input_dir: str, output_dir: str) -> list[str]:
         "--analysts", "market,news,fundamentals",
         "--output-language", "English",
     ]
-    min_mcap = os.getenv("TRADINGAGENTS_MIN_MCAP", "1B")
+    min_mcap = os.getenv("TRADINGAGENTS_MIN_MCAP", "2B")
     if min_mcap:
         argv.extend(["--min-mcap", min_mcap])
     return argv
