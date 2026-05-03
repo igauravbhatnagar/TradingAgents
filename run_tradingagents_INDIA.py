@@ -20,13 +20,13 @@ def _configure_environment() -> None:
     google_api_key = os.getenv("GOOGLE_API_KEY", "")
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
-    public_base_url = os.getenv("TRADINGAGENTS_PUBLIC_BASE_URL", "http://136.117.233.181/")
+    min_mcap = os.getenv("TRADINGAGENTS_MIN_MCAP", "1B")
 
     if google_api_key:
         os.environ["GOOGLE_API_KEY"] = google_api_key
 
-    if public_base_url:
-        os.environ["TRADINGAGENTS_PUBLIC_BASE_URL"] = public_base_url
+    if min_mcap:
+        os.environ["TRADINGAGENTS_MIN_MCAP"] = min_mcap
 
     telegram_enabled = bool(telegram_bot_token and telegram_chat_id)
     os.environ["TELEGRAM_ENABLED"] = "true" if telegram_enabled else "false"
@@ -64,7 +64,7 @@ def _check_required_modules() -> None:
 
 
 def _build_argv(input_dir: str, output_dir: str) -> list[str]:
-    return [
+    argv = [
         "run_tradingagents_INDIA.py",
         "--input-mode", "file",
         "--country", "INDIA",
@@ -78,6 +78,10 @@ def _build_argv(input_dir: str, output_dir: str) -> list[str]:
         "--analysts", "market,news,fundamentals",
         "--output-language", "English",
     ]
+    min_mcap = os.getenv("TRADINGAGENTS_MIN_MCAP", "1B")
+    if min_mcap:
+        argv.extend(["--min-mcap", min_mcap])
+    return argv
 
 
 def main() -> None:
@@ -92,7 +96,7 @@ def main() -> None:
     print("INPUT_DIR:", input_dir)
     print("INPUT EXISTS:", os.path.exists(input_dir))
     print("OUTPUT_DIR:", output_dir)
-    print("PUBLIC_BASE_URL:", os.getenv("TRADINGAGENTS_PUBLIC_BASE_URL", "http://136.117.233.181/"))
+    print("MIN_MCAP:", os.getenv("TRADINGAGENTS_MIN_MCAP", "1B"))
 
     _configure_environment()
     _validate_paths(input_dir, output_dir)
