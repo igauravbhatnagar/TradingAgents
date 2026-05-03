@@ -34,7 +34,13 @@ from cli.announcements import fetch_announcements, display_announcements
 from cli.input_loader import InputLoadError, load_tickers_from_source, resolve_input_path
 from cli.stats_handler import StatsCallbackHandler
 from cli.summary import BatchTickerResult, build_result_details, build_summary_table, summarize_final_decision
-from cli.telegram import TelegramConfig, TelegramNotifier, build_completion_message, build_start_message
+from cli.telegram import (
+    TelegramConfig,
+    TelegramNotifier,
+    build_completion_message,
+    build_report_links,
+    build_start_message,
+)
 
 console = Console()
 
@@ -912,6 +918,11 @@ def run_batch_analysis(
                 run_time=format_runtime(started_at, ended_at),
                 summary_table=build_summary_table(results),
                 details=build_result_details(results),
+                report_links=build_report_links(
+                    results,
+                    results_dir=config.get("results_dir"),
+                    public_base_url=config.get("public_base_url"),
+                ),
             ),
         )
         return results
@@ -935,6 +946,11 @@ def run_batch_analysis(
                 run_time=format_runtime(started_at, ended_at),
                 summary_table=build_summary_table([failure_result]),
                 details=build_result_details([failure_result]),
+                report_links=build_report_links(
+                    [failure_result],
+                    results_dir=config.get("results_dir"),
+                    public_base_url=config.get("public_base_url"),
+                ),
             ),
         )
         raise

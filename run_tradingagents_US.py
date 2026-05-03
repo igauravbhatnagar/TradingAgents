@@ -20,9 +20,13 @@ def _configure_environment() -> None:
     google_api_key = os.getenv("GOOGLE_API_KEY", "")
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
+    public_base_url = os.getenv("TRADINGAGENTS_PUBLIC_BASE_URL", "http://136.117.233.181/")
 
     if google_api_key:
         os.environ["GOOGLE_API_KEY"] = google_api_key
+
+    if public_base_url:
+        os.environ["TRADINGAGENTS_PUBLIC_BASE_URL"] = public_base_url
 
     telegram_enabled = bool(telegram_bot_token and telegram_chat_id)
     os.environ["TELEGRAM_ENABLED"] = "true" if telegram_enabled else "false"
@@ -88,6 +92,7 @@ def main() -> None:
     print("INPUT_DIR:", input_dir)
     print("INPUT EXISTS:", os.path.exists(input_dir))
     print("OUTPUT_DIR:", output_dir)
+    print("PUBLIC_BASE_URL:", os.getenv("TRADINGAGENTS_PUBLIC_BASE_URL", "http://136.117.233.181/"))
 
     _configure_environment()
     _validate_paths(input_dir, output_dir)

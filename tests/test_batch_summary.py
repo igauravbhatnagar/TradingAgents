@@ -5,7 +5,7 @@ import pytest
 
 from cli.main import build_batch_run_folder_name, run_batch_analysis
 from cli.summary import BatchTickerResult, build_result_details, build_summary_table, summarize_final_decision
-from cli.telegram import build_completion_message, build_start_message
+from cli.telegram import build_completion_message, build_report_links, build_start_message
 
 
 @pytest.mark.unit
@@ -87,11 +87,36 @@ class TestBatchSummary:
             run_time="00:15:00",
             summary_table="Ticker | Status | Rating\nAAPL   | SUCCESS | Buy",
             details="- AAPL (Buy)\n  Summary of Key Points: Strong setup\n  Portfolio Manager Decision: Build position",
+            report_links='- AAPL: <a href="http://136.117.233.181/TradingAgents/a/b/complete_report.md">View complete_report.md</a> | <a href="http://136.117.233.181/TradingAgents/a/b/complete_report.md">Download</a>',
         )
 
         assert "TradingAgents batch run SUCCESS" in message
         assert "Summary Table" in message
         assert "Results" in message
+        assert "View complete_report.md" in message
+        assert "Download" in message
+
+    def test_build_report_links_uses_public_base_url(self, tmp_path: Path):
+        results_dir = tmp_path / "TradingAgents"
+        report_path = results_dir / "20260503_010000_us_1tickers" / "basket_us_1" / "saved_report" / "complete_report.md"
+        report_path.parent.mkdir(parents=True)
+        report_path.write_text("report", encoding="utf-8")
+
+        links = build_report_links(
+            [
+                BatchTickerResult(
+                    ticker="US basket (1 tickers)",
+                    analysis_date="2026-05-02",
+                    status="success",
+                    report_path=str(report_path),
+                )
+            ],
+            results_dir=str(results_dir),
+            public_base_url="http://136.117.233.181/",
+        )
+
+        assert "http://136.117.233.181/TradingAgents/20260503_010000_us_1tickers/basket_us_1/saved_report/complete_report.md" in links
+        assert "Download" in links
 
     def test_build_batch_run_folder_name_is_bounded(self):
         started_at = datetime.datetime(2026, 5, 2, 9, 15, 0)
