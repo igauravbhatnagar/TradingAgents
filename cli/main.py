@@ -1600,7 +1600,7 @@ def analyze(
         help="Research depth for non-interactive runs.",
     ),
     analysts: Optional[str] = typer.Option(
-        None,
+        "market,news,social",
         "--analysts",
         help="Comma-separated analyst keys for non-interactive runs: market,social,news,fundamentals.",
     ),
