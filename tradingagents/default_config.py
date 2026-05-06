@@ -21,7 +21,7 @@ DEFAULT_CONFIG = {
     # LLM settings
     "llm_provider": "google",
     "deep_think_llm": "gemini-3.1-pro-preview",
-    "quick_think_llm": "gemini-3-flash",
+    "quick_think_llm": "gemini-3-flash-preview",
     # When None, each provider's client falls back to its own default endpoint
     # (api.openai.com for OpenAI, generativelanguage.googleapis.com for Gemini, ...).
     # The CLI overrides this per provider when the user picks one. Keeping a
