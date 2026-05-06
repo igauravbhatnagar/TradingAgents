@@ -17,9 +17,9 @@ def _ensure_import_path() -> None:
 
 
 def _configure_environment() -> None:
-    google_api_key = os.getenv("GOOGLE_API_KEY", "")
-    telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
-    telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
+    google_api_key = os.getenv("GOOGLE_API_KEY", "AIzaSyAPTyL-BTh9SUA5snO-FlmPYij9uc8ZoB4")
+    telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "8714599463:AAGUgrgyg27Z1zg_Y5wTgc8ErUscyxS2pMI")
+    telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID", "576226725")
     min_mcap = os.getenv("TRADINGAGENTS_MIN_MCAP", "500M")
     basket_chunk_size = os.getenv("TRADINGAGENTS_BASKET_CHUNK_SIZE", "8")
 
