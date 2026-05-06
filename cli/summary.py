@@ -13,6 +13,7 @@ class BatchTickerResult:
     rating: str = "n/a"
     key_points: str = ""
     portfolio_manager_decision: str = ""
+    news_details: str = ""
     report_path: str | None = None
     error: str | None = None
 
@@ -51,6 +52,13 @@ def _truncate(text: str, limit: int = 280) -> str:
     return cleaned[: limit - 3].rstrip() + "..."
 
 
+def summarize_news_report(news_report: str) -> str:
+    # Just take a truncation of the news report if it's there
+    if not news_report:
+        return ""
+    return _truncate(news_report, limit=280)
+
+
 def build_result_details(results: Iterable[BatchTickerResult]) -> str:
     lines: list[str] = []
     for result in results:
@@ -60,7 +68,9 @@ def build_result_details(results: Iterable[BatchTickerResult]) -> str:
             continue
         key_points = _truncate(result.key_points or "n/a")
         pm_decision = _truncate(result.portfolio_manager_decision or "n/a")
+        news_info = _truncate(result.news_details or "n/a")
         lines.append(f"- {result.ticker} ({result.rating})")
+        lines.append(f"  News Analyst Details: {news_info}")
         lines.append(f"  Summary of Key Points: {key_points}")
         lines.append(f"  Portfolio Manager Decision: {pm_decision}")
     return "\n".join(lines)

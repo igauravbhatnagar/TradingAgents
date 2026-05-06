@@ -33,7 +33,7 @@ from cli.utils import *
 from cli.announcements import fetch_announcements, display_announcements
 from cli.input_loader import InputLoadError, load_tickers_from_source, resolve_input_path
 from cli.stats_handler import StatsCallbackHandler
-from cli.summary import BatchTickerResult, build_result_details, build_summary_table, summarize_final_decision
+from cli.summary import BatchTickerResult, build_result_details, build_summary_table, summarize_final_decision, summarize_news_report
 from cli.telegram import (
     TelegramConfig,
     TelegramNotifier,
@@ -841,6 +841,7 @@ def run_single_background_analysis(
         rating, key_points, pm_decision = summarize_final_decision(
             final_state["final_trade_decision"]
         )
+        news_details = summarize_news_report(final_state.get("news_report", ""))
         return BatchTickerResult(
             ticker=result_label,
             analysis_date=analysis_date,
@@ -848,6 +849,7 @@ def run_single_background_analysis(
             rating=rating,
             key_points=key_points,
             portfolio_manager_decision=pm_decision,
+            news_details=news_details,
             report_path=str(report_file),
         )
     except Exception as exc:

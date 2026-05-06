@@ -75,10 +75,10 @@ def _build_argv(input_dir: str, output_dir: str) -> list[str]:
         "--output-dir", output_dir,
         "--latest-files", "1",
         "--llm-provider", "google",
-        "--quick-model", "gemini-2.5-flash",
+        "--quick-model", "gemini-3-flash",
         "--deep-model", "gemini-3.1-pro-preview",
-        "--research-depth", "1",
-        "--analysts", "market,news,fundamentals",
+        "--research-depth", "2",
+        "--analysts", "market,news,social",
         "--output-language", "English",
     ]
     min_mcap = os.getenv("TRADINGAGENTS_MIN_MCAP", "500M")
