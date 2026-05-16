@@ -83,6 +83,22 @@ def _parse_mcap_value(value: str | int | float) -> float | None:
     return parsed
 
 
+def _parse_numeric_value(value: str | int | float) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    if not isinstance(value, str):
+        return None
+
+    cleaned = value.strip().upper().replace(",", "").replace("%", "")
+    if not cleaned or cleaned == "N/A":
+        return None
+
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
 def _row_mcap_value(
     row: dict[str | None, str | list[str]],
     mcap_fieldname: str,
@@ -104,6 +120,8 @@ def _load_symbol_column(
     file_path: Path,
     country: str | None = None,
     min_mcap: str | None = None,
+    max_free_float_pct: float | None = None,
+    min_one_week_change_pct: float | None = None,
 ) -> list[str]:
     with file_path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
@@ -129,12 +147,36 @@ def _load_symbol_column(
                     f"Invalid --min-mcap value: {min_mcap}. Expected formats like 1B, 750M, or 1200000000."
                 )
 
+        free_float_fieldname = None
+        if max_free_float_pct is not None:
+            free_float_fieldname = _find_fieldname(reader.fieldnames, "Free Float %")
+            if not free_float_fieldname:
+                raise InputLoadError(
+                    f"CSV file does not contain required 'Free Float %' column for --max-free-float-pct: {file_path}"
+                )
+
+        one_week_change_fieldname = None
+        if min_one_week_change_pct is not None:
+            one_week_change_fieldname = _find_fieldname(reader.fieldnames, "1W Change %")
+            if not one_week_change_fieldname:
+                raise InputLoadError(
+                    f"CSV file does not contain required '1W Change %' column for --min-1w-change-pct: {file_path}"
+                )
+
         symbols: list[str] = []
         for row in reader:
             symbol = row.get(symbol_fieldname, "")
             if threshold is not None:
                 mcap_value = _parse_mcap_value(_row_mcap_value(row, mcap_fieldname))
                 if mcap_value is None or mcap_value <= threshold:
+                    continue
+            if max_free_float_pct is not None:
+                free_float_value = _parse_numeric_value(str(row.get(free_float_fieldname, "")))
+                if free_float_value is None or free_float_value >= max_free_float_pct:
+                    continue
+            if min_one_week_change_pct is not None:
+                one_week_change_value = _parse_numeric_value(str(row.get(one_week_change_fieldname, "")))
+                if one_week_change_value is None or one_week_change_value <= min_one_week_change_pct:
                     continue
             symbols.append(symbol)
 
@@ -145,10 +187,17 @@ def _load_delimited_text(
     file_path: Path,
     country: str | None = None,
     min_mcap: str | None = None,
+    max_free_float_pct: float | None = None,
+    min_one_week_change_pct: float | None = None,
 ) -> list[str]:
-    if min_mcap is not None:
+    if (
+        min_mcap is not None
+        or max_free_float_pct is not None
+        or min_one_week_change_pct is not None
+    ):
         raise InputLoadError(
-            f"--min-mcap can only be used with CSV inputs that contain an MCAP column: {file_path}"
+            "CSV row filters can only be used with CSV inputs that contain the required columns: "
+            f"{file_path}"
         )
 
     raw_text = file_path.read_text(encoding="utf-8-sig")
@@ -163,26 +212,46 @@ def load_tickers_from_file(
     file_path: Path,
     country: str | None = None,
     min_mcap: str | None = None,
+    max_free_float_pct: float | None = None,
+    min_one_week_change_pct: float | None = None,
 ) -> list[str]:
     if not file_path.exists() or not file_path.is_file():
         raise InputLoadError(f"Input file does not exist: {file_path}")
 
     if file_path.suffix.lower() == ".csv":
         try:
-            tickers = _load_symbol_column(file_path, country=country, min_mcap=min_mcap)
+            tickers = _load_symbol_column(
+                file_path,
+                country=country,
+                min_mcap=min_mcap,
+                max_free_float_pct=max_free_float_pct,
+                min_one_week_change_pct=min_one_week_change_pct,
+            )
             if tickers:
                 return tickers
-            if min_mcap is not None:
+            if any(
+                value is not None
+                for value in (min_mcap, max_free_float_pct, min_one_week_change_pct)
+            ):
                 raise InputLoadError(
-                    f"No tickers matched --min-mcap {min_mcap} in input file: {file_path}"
+                    f"No tickers matched the configured CSV filters in input file: {file_path}"
                 )
         except InputLoadError:
-            if min_mcap is not None:
+            if any(
+                value is not None
+                for value in (min_mcap, max_free_float_pct, min_one_week_change_pct)
+            ):
                 raise
             # Allow a plain comma-separated ticker file even when the extension is .csv.
             pass
 
-    return _load_delimited_text(file_path, country=country, min_mcap=min_mcap)
+    return _load_delimited_text(
+        file_path,
+        country=country,
+        min_mcap=min_mcap,
+        max_free_float_pct=max_free_float_pct,
+        min_one_week_change_pct=min_one_week_change_pct,
+    )
 
 
 def _csv_files_sorted(folder_path: Path) -> list[Path]:
@@ -198,6 +267,8 @@ def load_tickers_from_folder(
     latest_files: int = 1,
     country: str | None = None,
     min_mcap: str | None = None,
+    max_free_float_pct: float | None = None,
+    min_one_week_change_pct: float | None = None,
 ) -> tuple[list[Path], list[str]]:
     if latest_files < 1:
         raise InputLoadError("latest_files must be at least 1")
@@ -211,13 +282,24 @@ def load_tickers_from_folder(
     selected_files = csv_files[:latest_files]
     tickers: list[str] = []
     for file_path in selected_files:
-        tickers.extend(_load_symbol_column(file_path, country=country, min_mcap=min_mcap))
+        tickers.extend(
+            _load_symbol_column(
+                file_path,
+                country=country,
+                min_mcap=min_mcap,
+                max_free_float_pct=max_free_float_pct,
+                min_one_week_change_pct=min_one_week_change_pct,
+            )
+        )
 
     deduped = _dedupe_tickers(tickers, country=country)
     if not deduped:
-        if min_mcap is not None:
+        if any(
+            value is not None
+            for value in (min_mcap, max_free_float_pct, min_one_week_change_pct)
+        ):
             raise InputLoadError(
-                f"No tickers matched --min-mcap {min_mcap} across selected CSV files in: {folder_path}"
+                f"No tickers matched the configured CSV filters across selected CSV files in: {folder_path}"
             )
         raise InputLoadError(f"No tickers found across selected CSV files in: {folder_path}")
     return selected_files, deduped
@@ -228,6 +310,8 @@ def load_tickers_from_source(
     input_path: str | None,
     latest_files: int = 1,
     min_mcap: str | None = None,
+    max_free_float_pct: float | None = None,
+    min_one_week_change_pct: float | None = None,
 ) -> tuple[Path, list[Path], list[str]]:
     resolved_path = resolve_input_path(country, input_path)
     if resolved_path.is_dir() or (not resolved_path.exists() and input_path is None):
@@ -236,7 +320,15 @@ def load_tickers_from_source(
             latest_files=latest_files,
             country=country,
             min_mcap=min_mcap,
+            max_free_float_pct=max_free_float_pct,
+            min_one_week_change_pct=min_one_week_change_pct,
         )
         return resolved_path, selected_files, tickers
-    tickers = load_tickers_from_file(resolved_path, country=country, min_mcap=min_mcap)
+    tickers = load_tickers_from_file(
+        resolved_path,
+        country=country,
+        min_mcap=min_mcap,
+        max_free_float_pct=max_free_float_pct,
+        min_one_week_change_pct=min_one_week_change_pct,
+    )
     return resolved_path, [resolved_path], tickers

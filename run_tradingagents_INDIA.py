@@ -9,6 +9,10 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # ✅ Go one level UP to reach colab-notebooks
 BASE_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 
+DEFAULT_MIN_MCAP = "500M"
+DEFAULT_MAX_FREE_FLOAT_PCT = "60"
+DEFAULT_MIN_ONE_WEEK_CHANGE_PCT = "0"
+
 
 def _ensure_import_path() -> None:
     # ✅ Add project root, not script dir
@@ -20,7 +24,9 @@ def _configure_environment() -> None:
     google_api_key = os.getenv("GOOGLE_API_KEY", "AIzaSyAPTyL-BTh9SUA5snO-FlmPYij9uc8ZoB4")
     telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "8714599463:AAGUgrgyg27Z1zg_Y5wTgc8ErUscyxS2pMI")
     telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID", "576226725")
-    min_mcap = os.getenv("TRADINGAGENTS_MIN_MCAP", "500M")
+    min_mcap = os.getenv("TRADINGAGENTS_MIN_MCAP", DEFAULT_MIN_MCAP)
+    max_free_float_pct = os.getenv("TRADINGAGENTS_MAX_FREE_FLOAT_PCT", DEFAULT_MAX_FREE_FLOAT_PCT)
+    min_one_week_change_pct = os.getenv("TRADINGAGENTS_MIN_1W_CHANGE_PCT", DEFAULT_MIN_ONE_WEEK_CHANGE_PCT)
     basket_chunk_size = os.getenv("TRADINGAGENTS_BASKET_CHUNK_SIZE", "8")
 
     if google_api_key:
@@ -28,6 +34,10 @@ def _configure_environment() -> None:
 
     if min_mcap:
         os.environ["TRADINGAGENTS_MIN_MCAP"] = min_mcap
+    if max_free_float_pct:
+        os.environ["TRADINGAGENTS_MAX_FREE_FLOAT_PCT"] = max_free_float_pct
+    if min_one_week_change_pct:
+        os.environ["TRADINGAGENTS_MIN_1W_CHANGE_PCT"] = min_one_week_change_pct
     if basket_chunk_size:
         os.environ["TRADINGAGENTS_BASKET_CHUNK_SIZE"] = basket_chunk_size
 
@@ -81,10 +91,16 @@ def _build_argv(input_dir: str, output_dir: str) -> list[str]:
         "--analysts", "market,news,social",
         "--output-language", "English",
     ]
-    min_mcap = os.getenv("TRADINGAGENTS_MIN_MCAP", "500M")
+    min_mcap = os.getenv("TRADINGAGENTS_MIN_MCAP", DEFAULT_MIN_MCAP)
+    max_free_float_pct = os.getenv("TRADINGAGENTS_MAX_FREE_FLOAT_PCT", DEFAULT_MAX_FREE_FLOAT_PCT)
+    min_one_week_change_pct = os.getenv("TRADINGAGENTS_MIN_1W_CHANGE_PCT", DEFAULT_MIN_ONE_WEEK_CHANGE_PCT)
     basket_chunk_size = os.getenv("TRADINGAGENTS_BASKET_CHUNK_SIZE", "8")
     if min_mcap:
         argv.extend(["--min-mcap", min_mcap])
+    if max_free_float_pct:
+        argv.extend(["--max-free-float-pct", max_free_float_pct])
+    if min_one_week_change_pct:
+        argv.extend(["--min-1w-change-pct", min_one_week_change_pct])
     if basket_chunk_size:
         argv.extend(["--basket-chunk-size", basket_chunk_size])
     return argv
@@ -102,7 +118,9 @@ def main() -> None:
     print("INPUT_DIR:", input_dir)
     print("INPUT EXISTS:", os.path.exists(input_dir))
     print("OUTPUT_DIR:", output_dir)
-    print("MIN_MCAP:", os.getenv("TRADINGAGENTS_MIN_MCAP", "500M"))
+    print("MIN_MCAP:", os.getenv("TRADINGAGENTS_MIN_MCAP", DEFAULT_MIN_MCAP))
+    print("MAX_FREE_FLOAT_PCT:", os.getenv("TRADINGAGENTS_MAX_FREE_FLOAT_PCT", DEFAULT_MAX_FREE_FLOAT_PCT))
+    print("MIN_1W_CHANGE_PCT:", os.getenv("TRADINGAGENTS_MIN_1W_CHANGE_PCT", DEFAULT_MIN_ONE_WEEK_CHANGE_PCT))
     print("BASKET_CHUNK_SIZE:", os.getenv("TRADINGAGENTS_BASKET_CHUNK_SIZE", "8"))
 
     _configure_environment()

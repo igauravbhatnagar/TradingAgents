@@ -868,6 +868,8 @@ def run_batch_analysis(
     input_path: str | None,
     latest_files: int,
     min_mcap: str | None = None,
+    max_free_float_pct: float | None = None,
+    min_one_week_change_pct: float | None = None,
     basket_chunk_size: int = 8,
     checkpoint: bool = False,
 ) -> list[BatchTickerResult]:
@@ -883,6 +885,8 @@ def run_batch_analysis(
             input_path,
             latest_files=latest_files,
             min_mcap=min_mcap,
+            max_free_float_pct=max_free_float_pct,
+            min_one_week_change_pct=min_one_week_change_pct,
         )
         base_output_dir = base_selections.get("results_dir")
         if not base_output_dir:
@@ -1646,6 +1650,16 @@ def analyze(
         "--min-mcap",
         help="Optional minimum market cap filter for CSV inputs, for example 1B or 750M.",
     ),
+    max_free_float_pct: Optional[float] = typer.Option(
+        None,
+        "--max-free-float-pct",
+        help="Optional maximum free float percent filter for CSV inputs. Rows must be strictly below this value.",
+    ),
+    min_one_week_change_pct: Optional[float] = typer.Option(
+        None,
+        "--min-1w-change-pct",
+        help="Optional minimum 1W change percent filter for CSV inputs. Rows must be strictly above this value.",
+    ),
     basket_chunk_size: int = typer.Option(
         8,
         "--basket-chunk-size",
@@ -1700,6 +1714,8 @@ def analyze(
             input_path=input_path,
             latest_files=latest_files,
             min_mcap=min_mcap,
+            max_free_float_pct=max_free_float_pct,
+            min_one_week_change_pct=min_one_week_change_pct,
             basket_chunk_size=basket_chunk_size,
             checkpoint=checkpoint,
         )

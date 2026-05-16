@@ -71,8 +71,41 @@ class TestBatchInputLoader:
         file_path = tmp_path / "tickers.txt"
         file_path.write_text("aapl, msft", encoding="utf-8")
 
-        with pytest.raises(InputLoadError, match="--min-mcap"):
+        with pytest.raises(InputLoadError, match="CSV row filters"):
             load_tickers_from_file(file_path, min_mcap="1B")
+
+    def test_load_tickers_from_file_applies_free_float_and_one_week_change_filters(self, tmp_path: Path):
+        file_path = tmp_path / "setup.csv"
+        file_path.write_text(
+            "Symbol,MCAP,Free Float %,1W Change %\n"
+            "KEEP,1.5B,59.9%,0.1\n"
+            "HIGH_FLOAT,2B,60,5\n"
+            "FLAT,2B,50,0\n"
+            "NEGATIVE,2B,50,-1\n"
+            "SMALL,900M,50,5\n",
+            encoding="utf-8",
+        )
+
+        assert load_tickers_from_file(
+            file_path,
+            min_mcap="1B",
+            max_free_float_pct=60,
+            min_one_week_change_pct=0,
+        ) == ["KEEP"]
+
+    def test_load_tickers_from_file_requires_free_float_column_when_filter_is_used(self, tmp_path: Path):
+        file_path = tmp_path / "setup.csv"
+        file_path.write_text("Symbol,MCAP,1W Change %\nAAPL,2B,1\n", encoding="utf-8")
+
+        with pytest.raises(InputLoadError, match="Free Float %"):
+            load_tickers_from_file(file_path, max_free_float_pct=60)
+
+    def test_load_tickers_from_file_requires_one_week_change_column_when_filter_is_used(self, tmp_path: Path):
+        file_path = tmp_path / "setup.csv"
+        file_path.write_text("Symbol,MCAP,Free Float %\nAAPL,2B,50\n", encoding="utf-8")
+
+        with pytest.raises(InputLoadError, match="1W Change %"):
+            load_tickers_from_file(file_path, min_one_week_change_pct=0)
 
     def test_folder_mode_reads_latest_files(self, tmp_path: Path):
         older = tmp_path / "older.csv"
@@ -149,3 +182,25 @@ class TestBatchInputLoader:
         assert resolved_path == csv_file
         assert selected_files == [csv_file]
         assert tickers == ["LARGE", "MID"]
+
+    def test_load_tickers_from_source_applies_all_csv_filters(self, tmp_path: Path):
+        csv_file = tmp_path / "tickers.csv"
+        csv_file.write_text(
+            "Symbol,MCAP,Free Float %,1W Change %\n"
+            "PASS,3B,45,2\n"
+            "FAIL_FLOAT,3B,60,2\n"
+            "FAIL_WEEK,3B,45,0\n",
+            encoding="utf-8",
+        )
+
+        resolved_path, selected_files, tickers = load_tickers_from_source(
+            "US",
+            str(csv_file),
+            min_mcap="1B",
+            max_free_float_pct=60,
+            min_one_week_change_pct=0,
+        )
+
+        assert resolved_path == csv_file
+        assert selected_files == [csv_file]
+        assert tickers == ["PASS"]
